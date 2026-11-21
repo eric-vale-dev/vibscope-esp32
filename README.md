@@ -20,7 +20,7 @@ MPU9250 --I2C 400 kHz--> ESP32 --USB serie 921600 baud (binario)--> Dashboard (C
 
 ```
 sismografo/
-├── arduino/analizador_vibraciones/analizador_vibraciones.ino   # firmware
+├── arduino/arduino.ino   # firmware
 ├── web/index.html, style.css, app.js                           # dashboard
 ├── matlab/analisis_vibraciones.m                               # análisis del CSV
 ├── context.md                                                  # requerimientos y decisiones
@@ -46,7 +46,7 @@ orientación de los ejes X, Y, Z respecto al marco.
 1. Instala el paquete de placas **esp32 by Espressif Systems** (Gestor de placas). Probado con la versión **4.0.0**.
 2. Selecciona la placa **ESP32 Dev Module**.
 3. **No hace falta instalar librerías**: el MPU9250 se lee por registros con `Wire`.
-4. Abre `arduino/analizador_vibraciones/analizador_vibraciones.ino`, selecciona el puerto y sube el programa.
+4. Abre `arduino/arduino.ino`, selecciona el puerto y sube el programa.
 5. **No abras el Monitor Serie** mientras uses el dashboard: el puerto solo puede usarlo un programa a la vez.
 
 ### Permisos del puerto serie

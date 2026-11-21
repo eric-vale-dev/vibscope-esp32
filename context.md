@@ -33,7 +33,7 @@ Se debe construir la **emulación de un prototipo de analizador de vibraciones**
 > **Actualización (implementación actual):** el transporte es **USB serie con Web Serial API** (Chrome/Edge),
 > no WiFi/WebSocket. Se descartan por ahora el modo AP, `dashboard_html.h`, la vista móvil y el semáforo.
 > El protocolo JSON de la sección 4.3 se reemplazó por el protocolo binario descrito abajo, porque a 1 kHz el
-> texto (~30 KB/s) no cabe en 115200 baudios. Estructura real: `arduino/analizador_vibraciones/`, `web/`, `matlab/`.
+> texto (~30 KB/s) no cabe en 115200 baudios. Estructura real: `arduino/arduino.ino`, `web/`, `matlab/`.
 > Firmware sin librerías (acceso directo a registros del MPU). El CSV se exporta sin encabezado: `t_s,ax_g,ay_g,az_g`.
 >
 > **Protocolo binario ESP32 → PC** (921600 baudios, little-endian):

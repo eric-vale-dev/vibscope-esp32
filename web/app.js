@@ -5,7 +5,7 @@
   Flujo:  ESP32 --USB serie (Web Serial, 921600 baud, binario)--> procesarBytes()
           --> procesarBloque() --> buffers circulares --> FFT / indicadores / gráficas / CSV
 
-  Formato de trama (ver arduino/analizador_vibraciones.ino y context.md):
+  Formato de trama (ver arduino/arduino.ino y context.md):
     0xAA 0x55 | tipo | largo(u16) | carga útil | checksum(XOR de tipo..carga)
 */
 
