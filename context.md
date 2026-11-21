@@ -30,6 +30,20 @@ Se debe construir la **emulación de un prototipo de analizador de vibraciones**
 
 ## 2. Restricciones y decisiones ya tomadas
 
+> **Actualización (implementación actual):** el transporte es **USB serie con Web Serial API** (Chrome/Edge),
+> no WiFi/WebSocket. Se descartan por ahora el modo AP, `dashboard_html.h`, la vista móvil y el semáforo.
+> El protocolo JSON de la sección 4.3 se reemplazó por el protocolo binario descrito abajo, porque a 1 kHz el
+> texto (~30 KB/s) no cabe en 115200 baudios. Estructura real: `arduino/analizador_vibraciones/`, `web/`, `matlab/`.
+> Firmware sin librerías (acceso directo a registros del MPU). El CSV se exporta sin encabezado: `t_s,ax_g,ay_g,az_g`.
+>
+> **Protocolo binario ESP32 → PC** (921600 baudios, little-endian):
+> `0xAA 0x55 | tipo(u8) | largo(u16) | carga | checksum(u8 = XOR de tipo..carga)`
+> - tipo 1 (datos): `fs(u16) | fs_real×10(u16) | rango_g(u8) | reservado(u8) | perdidas(u16) | t0_ms(u32) | N×[ax,ay,az int16]`; g = valor / (32768 / rango_g).
+> - tipo 2 (texto ASCII): mensajes de estado (`LISTO`, `OK ...`, `ERROR ...`, `INFO ...`).
+>
+> **Comandos PC → ESP32** (texto + `\n`): `START`, `STOP`, `CAL` (conserva gravedad), `CAL DC`, `SET fs=1000 range=4`, `INFO`.
+> fs válidas: 250/500/1000 Hz. Rangos: 2/4/8/16 g.
+
 | Tema | Decisión |
 |---|---|
 | Entorno de desarrollo | **Fedora Linux** (Arduino IDE 2.x) |
