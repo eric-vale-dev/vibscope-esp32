@@ -1,37 +1,8 @@
-/*
-  vibscope-esp32 - Analizador de vibraciones (ESP32 + MPU9250)
-
-  - Lee aceleración X, Y, Z del MPU9250 por I2C (acceso directo a registros, sin librerías).
-  - Muestrea a frecuencia fija (250 / 500 / 1000 Hz) usando micros(), sin delay() en el ciclo.
-  - Envía bloques binarios por USB serie (921600 baudios) al dashboard (web/index.html).
-  - Recibe comandos de texto por la misma conexión: START, STOP, CAL, SET, INFO.
-
-  Conexiones:  MPU9250 VCC->3V3, GND->GND, SDA->GPIO21, SCL->GPIO22  (¡nunca 5 V!)
-
-  Arquitectura (FreeRTOS):
-    Núcleo 1: tareaMuestreo  -> único que toca el bus I2C. Llena bloques.
-    Núcleo 0: tareaEnvio     -> escribe por serie y procesa comandos.
-    Se comunican con colas de punteros a bloques (colaLibres / colaLlenos).
-
-  Protocolo ESP32 -> PC (todo little-endian):
-    0xAA 0x55 | tipo (1) | largo (2) | carga útil (largo bytes) | checksum (1)
-    checksum = XOR de todos los bytes desde "tipo" hasta el final de la carga útil.
-
-    tipo 1 = datos. Carga útil:
-      fs (u16) | fs_real x10 (u16) | rango_g (u8) | reservado (u8) |
-      perdidas (u16) | t0_ms (u32) | N x [ax, ay, az] (int16 crudos)
-      g = valor / (32768 / rango_g)
-    tipo 2 = texto (ASCII) con mensajes de estado.
-
-  Comandos PC -> ESP32 (texto terminado en \n):
-    START | STOP | CAL | CAL DC | SET fs=1000 range=4 | INFO
-*/
-
 #include <Arduino.h>
 #include <Wire.h>
 #include <stdarg.h>
 
-// ======================= Configuración (fácil de cambiar) =======================
+// Configuración
 static const uint8_t  PIN_SDA        = 21;
 static const uint8_t  PIN_SCL        = 22;
 static const uint32_t I2C_HZ         = 400000;
@@ -39,9 +10,8 @@ static const uint32_t BAUDIOS        = 921600;
 static const uint16_t FS_INICIAL     = 1000;   // Hz: 250, 500 o 1000
 static const uint8_t  RANGO_INICIAL  = 4;      // g: 2, 4, 8 o 16
 static const uint16_t MUESTRAS_CAL   = 500;    // muestras promediadas al calibrar
-// ================================================================================
 
-// ---- Registros del MPU9250 / MPU6500 ----
+// Registros del MPU
 static const uint8_t REG_SMPLRT_DIV   = 0x19;
 static const uint8_t REG_ACCEL_CONFIG = 0x1C;
 static const uint8_t REG_ACCEL_CONF2  = 0x1D;
@@ -50,7 +20,7 @@ static const uint8_t REG_PWR_MGMT_1   = 0x6B;
 static const uint8_t REG_PWR_MGMT_2   = 0x6C;
 static const uint8_t REG_WHO_AM_I     = 0x75;
 
-// ---- Bloques de muestras ----
+// Bloques de muestras
 static const uint16_t MAX_N       = 512;   // muestras máximas por bloque
 static const uint8_t  NUM_BUFFERS = 6;     // bloques en circulación
 
@@ -71,7 +41,7 @@ static QueueHandle_t colaLibres;   // Bloque*
 static QueueHandle_t colaLlenos;   // Bloque*
 static QueueHandle_t colaMsg;      // Mensaje
 
-// ---- Estado compartido entre tareas ----
+// Estado compartido
 static volatile bool     corriendo     = false;
 static volatile uint8_t  calSolicitada = 0;      // 0 = nada, 1 = conservar gravedad, 2 = quitar todo (DC)
 static volatile uint16_t pendFs        = 0;      // 0 = sin cambio pendiente
@@ -84,9 +54,9 @@ static uint8_t dirMPU   = 0x68;
 static uint8_t chipId   = 0;
 static bool    sensorOk = false;
 
-// ======================= Utilidades =======================
+// Utilidades
 
-// Pone un mensaje de texto en la cola para que lo envíe tareaEnvio.
+// Encola un mensaje de texto para el PC
 static void avisar(const char* fmt, ...) {
   Mensaje m;
   va_list ap;
@@ -97,14 +67,13 @@ static void avisar(const char* fmt, ...) {
 }
 
 static uint16_t tamanoBloque(uint16_t fs) {
-  // Aproximadamente medio segundo de datos por bloque.
+  // Bloque de ~0.5 s
   if (fs >= 1000) return 512;
   if (fs >= 500)  return 256;
   return 128;
 }
 
-// Filtro digital pasa-bajas (A_DLPF_CFG) acorde a la frecuencia de muestreo.
-// Con fchoice_b = 0 el acelerómetro entrega datos a 1 kHz internamente.
+// Filtro pasa-bajas del sensor según fs
 static uint8_t dlpfPara(uint16_t fs) {
   if (fs >= 1000) return 7;   // 420 Hz de ancho de banda
   if (fs >= 500)  return 1;   // 218 Hz
@@ -115,7 +84,7 @@ static uint8_t indiceRango(uint8_t g) {
   switch (g) { case 2: return 0; case 4: return 1; case 8: return 2; default: return 3; }
 }
 
-// ======================= Acceso al MPU =======================
+// Acceso al MPU
 
 static bool escribirReg(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(dirMPU);
@@ -132,7 +101,7 @@ static int leerReg(uint8_t dir, uint8_t reg) {
   return Wire.read();
 }
 
-// Lee los 6 bytes de aceleración en una sola transacción.
+// Lee X, Y, Z (6 bytes en una transacción)
 static bool leerAceleracion(int16_t* v) {
   Wire.beginTransmission(dirMPU);
   Wire.write(REG_ACCEL_XOUT_H);
@@ -146,20 +115,20 @@ static bool leerAceleracion(int16_t* v) {
   return true;
 }
 
-// Solo escribe rango y filtro (no reinicia el chip).
+// Aplica rango y filtro
 static void aplicarConfigMPU() {
   escribirReg(REG_ACCEL_CONFIG, indiceRango(rangoActual) << 3);
-  escribirReg(REG_ACCEL_CONF2, dlpfPara(fsActual) & 0x07);   // bit 3 (fchoice_b) = 0 -> DLPF activo
+  escribirReg(REG_ACCEL_CONF2, dlpfPara(fsActual) & 0x07);   // DLPF activo
 }
 
 static bool iniciarMPU() {
-  // Buscar el sensor en 0x68 (AD0 a GND) o 0x69 (AD0 a 3V3).
+  // Buscar el sensor en 0x68 o 0x69
   const uint8_t candidatas[2] = {0x68, 0x69};
   sensorOk = false;
   for (uint8_t i = 0; i < 2; i++) {
     int id = leerReg(candidatas[i], REG_WHO_AM_I);
     if (id < 0) continue;
-    // 0x71 = MPU9250, 0x73 = MPU9255, 0x70 = MPU6500 (clon común), 0x68 = MPU6050/9150
+    // MPU9250, MPU9255, MPU6500 (clon) o MPU6050
     if (id == 0x71 || id == 0x73 || id == 0x70 || id == 0x68) {
       dirMPU = candidatas[i];
       chipId = (uint8_t)id;
@@ -190,8 +159,7 @@ static const char* nombreChip(uint8_t id) {
   }
 }
 
-// ======================= Tarea de muestreo (núcleo 1) =======================
-
+// Tarea de muestreo 
 static void tareaMuestreo(void*) {
   uint32_t periodo = 1000000UL / fsActual;   // microsegundos entre muestras
   uint32_t proximo = 0;
@@ -208,7 +176,7 @@ static void tareaMuestreo(void*) {
   uint16_t calN = 0;
 
   for (;;) {
-    // --- Cambios de configuración pedidos por el PC ---
+    // Cambiar configuración
     if (pendFs || pendRango) {
       uint16_t nf = pendFs ? pendFs : fsActual;
       uint8_t  nr = pendRango ? pendRango : rangoActual;
@@ -223,7 +191,7 @@ static void tareaMuestreo(void*) {
       avisar("OK SET fs=%u range=%u", (unsigned)fsActual, (unsigned)rangoActual);
     }
 
-    // --- Solicitud de calibración ---
+    // Iniciar calibración
     if (calSolicitada) {
       calModo = calSolicitada;
       calSolicitada = 0;
@@ -233,7 +201,7 @@ static void tareaMuestreo(void*) {
       enCurso = false;
     }
 
-    // --- Sin actividad: dormir un poco (aquí sí se puede ceder el procesador) ---
+    // En pausa: ceder el procesador
     if (!corriendo && !calActiva) {
       enCurso = false;
       k = 0;
@@ -248,14 +216,14 @@ static void tareaMuestreo(void*) {
       perdidasAcum = 0;
     }
 
-    // --- Espera hasta el instante de la próxima muestra (sin delay) ---
+    // Esperar a la próxima muestra
     int32_t falta = (int32_t)(proximo - micros());
     if (falta > 2000) { vTaskDelay(1); continue; }
     while ((int32_t)(proximo - micros()) > 0) { /* espera activa corta */ }
     uint32_t tMuestra = micros();
     proximo += periodo;
 
-    // Si nos atrasamos mucho, contar las muestras perdidas y resincronizar.
+    // Si hay atraso, contar muestras perdidas
     int32_t atraso = (int32_t)(micros() - proximo);
     if (atraso > (int32_t)(3 * periodo)) {
       perdidasAcum += (uint16_t)(atraso / (int32_t)periodo);
@@ -265,7 +233,7 @@ static void tareaMuestreo(void*) {
     int16_t raw[3];
     if (!leerAceleracion(raw)) { perdidasAcum++; continue; }
 
-    // --- Calibración: promediar N muestras en reposo ---
+    // Calibración
     if (calActiva) {
       for (int i = 0; i < 3; i++) sumas[i] += raw[i];
       calN++;
@@ -278,7 +246,7 @@ static void tareaMuestreo(void*) {
         }
         for (int i = 0; i < 3; i++) offsets[i] = (int32_t)media[i];
         if (calModo == 1) {
-          // Conservar la gravedad en el eje vertical (el de mayor valor).
+          // Conservar 1 g en el eje vertical
           float g = 32768.0f / (float)rangoActual;
           offsets[eje] = (int32_t)(media[eje] - (media[eje] > 0 ? g : -g));
         }
@@ -289,11 +257,11 @@ static void tareaMuestreo(void*) {
       if (!corriendo) continue;
     }
 
-    // --- Acumular en bloque ---
+    // Llenar bloque
     if (b == nullptr) {
       if (xQueueReceive(colaLibres, &b, 0) != pdTRUE) {
         b = nullptr;
-        perdidasAcum++;       // no hay bloque libre: el envío no da abasto
+        perdidasAcum++;       // sin bloque libre
         continue;
       }
       k = 0;
@@ -327,12 +295,10 @@ static void tareaMuestreo(void*) {
   }
 }
 
-// ======================= Envío y comandos (núcleo 0) =======================
-
+// Envío y comandos (núcleo 0)
 static uint8_t trama[3200];
 
 static void enviarTrama(uint8_t tipo, uint16_t len) {
-  // La carga útil ya está en trama[5 ...].
   trama[0] = 0xAA;
   trama[1] = 0x55;
   trama[2] = tipo;
@@ -431,7 +397,7 @@ static void tareaEnvio(void*) {
   }
 }
 
-// ======================= Arduino =======================
+// Arduino
 
 void setup() {
   Serial.setTxBufferSize(8192);
@@ -456,12 +422,11 @@ void setup() {
   }
 
   xTaskCreatePinnedToCore(tareaEnvio, "envio", 6144, nullptr, 1, nullptr, 0);
-  // El muestreo va en el núcleo 1 con prioridad alta. Se crea al final porque,
-  // mientras muestrea, la espera activa deja sin tiempo a las tareas de menor prioridad de ese núcleo.
+  // Muestreo en el núcleo 1 con prioridad alta
   xTaskCreatePinnedToCore(tareaMuestreo, "muestreo", 4096, nullptr, 3, nullptr, 1);
 }
 
 void loop() {
-  // Todo el trabajo se hace en las tareas; esta tarea ya no se necesita.
+  // Todo corre en las tareas
   vTaskDelete(nullptr);
 }

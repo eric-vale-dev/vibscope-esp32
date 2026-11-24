@@ -1,20 +1,6 @@
-/*
-  vibscope-esp32 - Dashboard del analizador de vibraciones
-  HTML + CSS + JavaScript puro, sin librerías.
-
-  Flujo:  ESP32 --USB serie (Web Serial, 921600 baud, binario)--> procesarBytes()
-          --> procesarBloque() --> buffers circulares --> FFT / indicadores / gráficas / CSV
-
-  Formato de trama (ver arduino/arduino.ino y context.md):
-    0xAA 0x55 | tipo | largo(u16) | carga útil | checksum(XOR de tipo..carga)
-*/
-
 'use strict';
 
-// =====================================================================
-// 1. FFT radix-2 (tamaño potencia de 2) y utilidades de señal
-// =====================================================================
-
+// FFT y utilidades de señal
 const cacheFFT = {};   // tablas precalculadas por tamaño
 
 function prepararFFT(n) {
@@ -37,7 +23,7 @@ function prepararFFT(n) {
   return cacheFFT[n];
 }
 
-// FFT in situ: re e im son Float64Array de largo n (potencia de 2).
+// FFT in situ (n potencia de 2)
 function fft(re, im) {
   const n = re.length;
   const { cos, sin, rev } = prepararFFT(n);
@@ -64,7 +50,7 @@ function fft(re, im) {
   }
 }
 
-// Ventanas (simétricas, igual que en el script de Matlab)
+// Ventanas
 function crearVentana(tipo, n) {
   const w = new Float64Array(n);
   for (let i = 0; i < n; i++) {
@@ -75,9 +61,7 @@ function crearVentana(tipo, n) {
   return w;
 }
 
-// Espectro de amplitud de un solo lado, en las mismas unidades de la señal.
-// Una senoide de amplitud A produce un pico de altura A.
-// Devuelve { amp: Float64Array(n/2+1), df, fPico, aPico }.
+// Espectro de amplitud: una senoide de amplitud A da un pico de altura A
 function calcularEspectro(senal, fs, tipoVentana) {
   const n = senal.length;
   let media = 0;
@@ -101,7 +85,7 @@ function calcularEspectro(senal, fs, tipoVentana) {
   }
   const df = fs / n;
 
-  // Pico (ignorando DC) con interpolación parabólica para afinar la frecuencia
+  // Pico del espectro (afinado con interpolación)
   let kMax = 1;
   for (let k = 2; k < mitad; k++) if (amp[k] > amp[kMax]) kMax = k;
   let fPico = kMax * df, aPico = amp[kMax];
@@ -117,7 +101,7 @@ function calcularEspectro(senal, fs, tipoVentana) {
   return { amp, df, fPico, aPico };
 }
 
-// Indicadores de una señal (sin componente DC)
+// Indicadores de la señal (sin DC)
 function calcularIndicadores(senal) {
   const n = senal.length;
   let media = 0;
@@ -135,9 +119,7 @@ function calcularIndicadores(senal) {
   return { rms, pico, picoAPico: max - min, cresta: rms > 0 ? pico / rms : 0 };
 }
 
-// =====================================================================
-// 2. Decodificación del protocolo binario
-// =====================================================================
+// Decodificador de tramas
 
 class DecodificadorTramas {
   // alRecibirDatos(bloque), alRecibirTexto(texto), alError()
@@ -157,7 +139,7 @@ class DecodificadorTramas {
     const b = this.buf;
     let i = 0;
     while (true) {
-      // Buscar la cabecera 0xAA 0x55 (resincronización)
+      // Buscar cabecera 0xAA 0x55
       while (i + 1 < b.length && !(b[i] === 0xAA && b[i + 1] === 0x55)) i++;
       if (i + 1 >= b.length) break;
       if (b.length - i < 5) break;                 // falta el encabezado completo
@@ -181,7 +163,7 @@ class DecodificadorTramas {
       else if (tipo === 2) this.alRecibirTexto(new TextDecoder().decode(carga));
       i += total;
     }
-    // Conservar solo lo no procesado (y un posible 0xAA al final)
+    // Guardar lo que falta por procesar
     this.buf = b.slice(i);
   }
 
@@ -205,9 +187,7 @@ class DecodificadorTramas {
   }
 }
 
-// =====================================================================
-// 3. Estado de la aplicación y buffers circulares
-// =====================================================================
+// Estado y buffers
 
 const CAPACIDAD = 8192;   // muestras por eje en el buffer circular (8 s a 1 kHz)
 
@@ -238,7 +218,7 @@ function reiniciarDatos() {
   for (const e of estado.ejes) e.fill(0);
 }
 
-// Últimas m muestras de un eje, en orden cronológico (copia)
+// Últimas m muestras de un eje
 function ultimas(eje, m) {
   const salida = new Float32Array(m);
   const inicio = estado.total - m;
@@ -246,7 +226,7 @@ function ultimas(eje, m) {
   return salida;
 }
 
-// Punto de entrada de los datos (viene del puerto serie o del simulador)
+// Guarda un bloque (del puerto serie o del simulador)
 function procesarBloque(bq) {
   const n = bq.x.length;
   for (let k = 0; k < n; k++) {
@@ -275,10 +255,7 @@ function procesarBloque(bq) {
   }
 }
 
-// =====================================================================
-// 4. Exportación CSV  (columnas: t_s, ax_g, ay_g, az_g; sin encabezado)
-// =====================================================================
-
+// Exportar CSV
 function generarCSV(g) {
   const fsProm = g.sumaFs / g.bloques;       // frecuencia real promedio de la grabación
   const filas = [];
@@ -310,9 +287,7 @@ function nombreArchivo() {
   return `vibraciones_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.csv`;
 }
 
-// =====================================================================
-// 5. Dibujo en canvas (sin librerías)
-// =====================================================================
+// Gráficas en canvas
 
 const COLORES = ['#ff6b6b', '#4ade80', '#60a5fa'];   // X, Y, Z
 
@@ -326,7 +301,7 @@ function prepararCanvas(canvas) {
   return { g, w: r.width, h: r.height };
 }
 
-// Marcas "bonitas" para un eje: 1, 2, 5 x 10^n
+// Marcas del eje (1, 2, 5 x 10^n)
 function marcas(min, max, cuantas) {
   if (!(max > min)) max = min + 1e-6;
   const paso0 = (max - min) / cuantas;
@@ -339,10 +314,7 @@ function marcas(min, max, cuantas) {
   return { lista, dec };
 }
 
-/*
-  opciones: { series:[{datos, color, x0, dx}], xMin, xMax, yMin, yMax, xTitulo, yTitulo }
-  Devuelve funciones para convertir datos -> píxeles (para marcar el pico).
-*/
+// Dibuja una gráfica con ejes y series; devuelve funciones datos -> píxeles
 function dibujarGrafica(canvas, o) {
   const { g, w, h } = prepararCanvas(canvas);
   const mi = 52, md = 12, ms = 10, mb = 34;           // márgenes
@@ -417,10 +389,7 @@ function mensajeEnCanvas(canvas, texto) {
   g.fillText(texto, w / 2, h / 2);
 }
 
-// =====================================================================
-// 6. Interfaz, Web Serial y simulador
-// =====================================================================
-
+// Interfaz, Web Serial y simulador
 function iniciarInterfaz() {
   const $ = (id) => document.getElementById(id);
   const el = {
@@ -455,7 +424,7 @@ function iniciarInterfaz() {
     () => { estado.errores++; estado.nuevo = true; }
   );
 
-  // ---------- Estado visual ----------
+  // Estado visual
   function actualizarBotones() {
     const hayFuente = conectado || simTimer !== null;
     el.btnIniciar.disabled = !conectado;
@@ -470,7 +439,7 @@ function iniciarInterfaz() {
     el.estado.textContent = simTimer !== null ? 'Simulador' : conectado ? 'Conectado' : 'Desconectado';
   }
 
-  // ---------- Web Serial ----------
+  // Web Serial
   async function enviar(comando) {
     if (!puerto || !puerto.writable) return;
     const escritor = puerto.writable.getWriter();
@@ -494,7 +463,7 @@ function iniciarInterfaz() {
     actualizarBotones();
     log('Puerto abierto a 921600 baudios');
     leerPuerto();
-    // Al abrir el puerto la placa suele reiniciarse: esperar antes de preguntar.
+    // La placa se reinicia al abrir el puerto: esperar
     setTimeout(() => { if (conectado) { enviar('INFO'); enviar(`SET fs=${el.selFs.value} range=${el.selRango.value}`); } }, 1800);
   }
 
@@ -529,7 +498,7 @@ function iniciarInterfaz() {
     log('Puerto cerrado');
   }
 
-  // ---------- Simulador (señal sintética, sin hardware) ----------
+  // Simulador
   function iniciarSimulador() {
     if (conectado) return;
     reiniciarDatos();
@@ -559,7 +528,7 @@ function iniciarInterfaz() {
     actualizarBotones();
   }
 
-  // ---------- Grabación y CSV ----------
+  // Grabación y CSV
   function alternarGrabacion() {
     if (!estado.grabando) {
       estado.grabacion = { x: [], y: [], z: [], n: 0, sumaFs: 0, bloques: 0, perdidas: 0 };
@@ -584,16 +553,16 @@ function iniciarInterfaz() {
     }
   }
 
-  // ---------- Refresco periódico: indicadores, FFT y gráficas ----------
+  // Refresco de pantalla
   function refrescar() {
-    // Estado numérico (se actualiza siempre)
+    // Estado numérico
     el.vFs.textContent = estado.bloques ? estado.fs + ' Hz' : '–';
     el.vFsReal.textContent = estado.fsReal ? estado.fsReal.toFixed(1) + ' Hz' : '–';
     el.vBloque.textContent = estado.tamBloque ? estado.tamBloque + ' muestras' : '–';
     el.vBloques.textContent = estado.bloques;
     el.vPerdidas.textContent = estado.perdidas;
     el.vErrores.textContent = estado.errores;
-    // Tiempo de captura = muestras recibidas / fs. Se detiene cuando dejan de llegar datos.
+    // Tiempo de captura = muestras / fs
     const fsTiempo = estado.fsReal > 0 ? estado.fsReal : estado.fs;
     el.vTiempo.textContent = (estado.total / fsTiempo).toFixed(1) + ' s';
     if (estado.grabando && estado.grabacion) {
@@ -610,7 +579,7 @@ function iniciarInterfaz() {
     el.vResolucion.textContent = (fs / nfft).toFixed(2) + ' Hz';
     el.tituloEje.textContent = `(eje ${NOMBRES_EJE[eje]})`;
 
-    // ----- Gráfica de aceleración vs. tiempo -----
+    // Gráfica de aceleración vs. tiempo
     const visibles = Math.min(estado.total, Math.round(parseFloat(el.selVisible.value) * fs), CAPACIDAD);
     if (visibles < 2) {
       mensajeEnCanvas(el.cvTiempo, 'Sin datos. Conecta la ESP32 y pulsa Iniciar, o activa el simulador.');
@@ -639,7 +608,7 @@ function iniciarInterfaz() {
       xTitulo: 'Tiempo (s)', yTitulo: 'Aceleración (g)',
     });
 
-    // ----- Indicadores y espectro (ventana de análisis = últimas nfft muestras) -----
+    // Indicadores y espectro (últimas nfft muestras)
     if (estado.total < nfft) {
       mensajeEnCanvas(el.cvEspectro, `Acumulando muestras para la FFT (${estado.total}/${nfft})…`);
       return;
@@ -658,7 +627,7 @@ function iniciarInterfaz() {
       if (e === eje) espectroSel = esp;
     }
 
-    // ----- Gráfica del espectro -----
+    // Gráfica del espectro
     const esp = espectroSel;
     let aMax = 0;
     for (let k = 1; k < esp.amp.length; k++) if (esp.amp[k] > aMax) aMax = esp.amp[k];
@@ -678,7 +647,7 @@ function iniciarInterfaz() {
     r.g.fillText(`${esp.fPico.toFixed(1)} Hz · ${esp.aPico.toFixed(4)} g`, xp + (r.g.textAlign === 'left' ? 8 : -8), Math.max(yp, r.ms + 14));
   }
 
-  // ---------- Eventos ----------
+  // Eventos
   el.btnConectar.addEventListener('click', () => (conectado ? desconectar() : conectar()));
 
   el.btnIniciar.addEventListener('click', async () => {
@@ -729,7 +698,7 @@ if (typeof document !== 'undefined') {
   iniciarInterfaz();
 }
 
-// Para pruebas en Node (no afecta al navegador)
+// Exportar para pruebas en Node
 if (typeof module !== 'undefined') {
   module.exports = { fft, calcularEspectro, calcularIndicadores, DecodificadorTramas, generarCSV };
 }

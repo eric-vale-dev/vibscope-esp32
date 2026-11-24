@@ -236,3 +236,14 @@ analizador-vibraciones/
 - [ ] ¿Se requiere un rango de frecuencias específico para el análisis (por ejemplo 10–1000 Hz, como en ISO 10816)?
 - [ ] ¿Se pedirá velocidad (mm/s) además de aceleración? Implicaría integrar la señal en el dashboard.
 - [ ] Fecha real de presentación (la indicada, 18/11/2026, ya pasó).
+
+
+// vibscope-esp32: analizador de vibraciones (ESP32 + MPU9250)
+// Conexiones: VCC->3V3, GND->GND, SDA->GPIO21, SCL->GPIO22
+// Núcleo 1 muestra el sensor, núcleo 0 envía datos por USB y recibe comandos
+// Trama: 0xAA 0x55 | tipo | largo(u16) | carga | checksum XOR (ver README.md)
+// Comandos: START, STOP, CAL, CAL DC, SET fs=1000 range=4, INFO
+
+// vibscope-esp32: dashboard del analizador de vibraciones (HTML + CSS + JS puro)
+// Flujo: ESP32 -> Web Serial (921600 baud) -> decodificador -> buffers -> FFT, gráficas y CSV
+// Trama: 0xAA 0x55 | tipo | largo(u16) | carga | checksum XOR (ver README.md)
