@@ -593,7 +593,9 @@ function iniciarInterfaz() {
     el.vBloques.textContent = estado.bloques;
     el.vPerdidas.textContent = estado.perdidas;
     el.vErrores.textContent = estado.errores;
-    el.vTiempo.textContent = estado.inicioCaptura ? ((performance.now() - estado.inicioCaptura) / 1000).toFixed(1) + ' s' : '0.0 s';
+    // Tiempo de captura = muestras recibidas / fs. Se detiene cuando dejan de llegar datos.
+    const fsTiempo = estado.fsReal > 0 ? estado.fsReal : estado.fs;
+    el.vTiempo.textContent = (estado.total / fsTiempo).toFixed(1) + ' s';
     if (estado.grabando && estado.grabacion) {
       const g = estado.grabacion;
       el.infoGrabacion.textContent = `Grabando: ${g.n} muestras`;

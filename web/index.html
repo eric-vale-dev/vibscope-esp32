@@ -17,6 +17,8 @@
     (en Firefox solo funciona el modo simulador).
   </div>
 
+  <div class="disposicion">
+  <main>
   <!-- Controles -->
   <section class="tarjeta controles">
     <div class="grupo">
@@ -128,10 +130,14 @@
     </table>
   </section>
 
-  <section class="tarjeta">
+  </main>
+
+  <!-- Panel lateral fijo: siempre visible aunque se haga scroll -->
+  <aside class="tarjeta panel-mensajes">
     <h2>Mensajes del dispositivo</h2>
     <pre id="registro"></pre>
-  </section>
+  </aside>
+  </div>
 
   <script src="app.js"></script>
 </body>
