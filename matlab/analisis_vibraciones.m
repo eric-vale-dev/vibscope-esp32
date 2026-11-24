@@ -1,23 +1,15 @@
-%% analisis_vibraciones.m
-% Analisis del CSV exportado por el dashboard (vibscope-esp32).
-% Columnas del CSV (sin encabezado):  t_s, ax_g, ay_g, az_g
-%
-% Uso:
-%   1) Pon el nombre del archivo en "archivo" (o dejalo vacio para elegirlo con una ventana).
-%   2) Ejecuta el script. Muestra figuras y una tabla de resultados que se
-%      comparan con los indicadores del dashboard (validacion cruzada).
-%
-% Requisitos: MATLAB. pwelch pertenece al Signal Processing Toolbox; si no lo
-% tienes, el script omite esa parte y usa solo la FFT propia.
+% vibscope-esp32: analisis del CSV exportado por el dashboard
+% Columnas del CSV (sin encabezado): t_s, ax_g, ay_g, az_g
+% pwelch requiere el Signal Processing Toolbox (si no esta, se omite)
 
 clear; close all; clc;
 
-%% ---- Parametros ----
-archivo   = '';        % ej. 'vibraciones_20261118_101500.csv'  ('' = elegir con ventana)
-nfft      = 1024;      % puntos de la ventana de analisis (igual que el dashboard)
+%% Parametros
+archivo   = '';        % '' = elegir con ventana
+nfft      = 1024;      % puntos de la FFT
 ventana   = 'hann';    % 'hann' | 'hamming' | 'rect'
 
-%% ---- 1. Cargar el CSV ----
+%% Cargar el CSV
 if isempty(archivo)
     [f, ruta] = uigetfile('*.csv', 'Selecciona el CSV del dashboard');
     if isequal(f, 0), error('No se selecciono ningun archivo.'); end
@@ -28,7 +20,7 @@ t = datos(:, 1);
 a = datos(:, 2:4);                       % [ax ay az] en g
 ejes = {'X', 'Y', 'Z'};
 N = size(a, 1);
-fs = (N - 1) / (t(end) - t(1));          % frecuencia de muestreo real del registro
+fs = (N - 1) / (t(end) - t(1));          % fs real del registro
 fprintf('Archivo: %s\n', archivo);
 fprintf('Muestras: %d | Duracion: %.2f s | fs = %.2f Hz\n\n', N, t(end) - t(1), fs);
 
@@ -37,17 +29,16 @@ if N < nfft
     warning('Registro corto: se usa nfft = %d', nfft);
 end
 
-%% ---- 2. Indicadores del registro completo (sin componente DC) ----
-ac = a - mean(a, 1);                     % se quita la componente DC (gravedad / offset)
+%% Indicadores del registro completo
+ac = a - mean(a, 1);                     % sin componente DC
 rmsReg  = sqrt(mean(ac.^2, 1));
 picoReg = max(abs(ac), [], 1);
 p2pReg  = max(ac, [], 1) - min(ac, [], 1);
 crestaReg = picoReg ./ rmsReg;
 
-%% ---- 3. FFT de la ultima ventana de nfft muestras (igual que el dashboard) ----
+%% FFT de la ultima ventana
 w = ventana_(ventana, nfft);
 seg = ac(end - nfft + 1:end, :);         % ultimas nfft muestras
-% Nota: el dashboard quita la media de la ventana, no la del registro completo
 seg = seg - mean(seg, 1);
 espectro = abs(fft(seg .* w, nfft)) * 2 / sum(w);
 espectro = espectro(1:nfft/2 + 1, :);
@@ -57,8 +48,8 @@ fDom = zeros(1, 3);
 aDom = zeros(1, 3);
 for e = 1:3
     [~, k] = max(espectro(2:end-1, e));
-    k = k + 1;                           % indice dentro de espectro (se salta DC)
-    % Interpolacion parabolica (igual que el dashboard)
+    k = k + 1;                           % se salta DC
+    % Interpolacion parabolica
     y1 = espectro(k-1, e); y2 = espectro(k, e); y3 = espectro(k+1, e);
     den = y1 - 2*y2 + y3;
     d = 0;
@@ -67,13 +58,13 @@ for e = 1:3
     aDom(e) = y2;
 end
 
-% Indicadores sobre la misma ventana (comparables con la tabla del dashboard)
+% Indicadores de la ventana (comparar con el dashboard)
 rmsVen  = sqrt(mean(seg.^2, 1));
 picoVen = max(abs(seg), [], 1);
 p2pVen  = max(seg, [], 1) - min(seg, [], 1);
 crestaVen = picoVen ./ rmsVen;
 
-%% ---- 4. Densidad espectral de potencia (pwelch), si esta disponible ----
+%% Densidad espectral (pwelch)
 tienePwelch = exist('pwelch', 'file') == 2;
 if tienePwelch
     nseg = min(N, 1024);
@@ -86,7 +77,7 @@ if tienePwelch
     end
 end
 
-%% ---- 5. Figuras ----
+%% Figuras
 colores = {[1 0.42 0.42], [0.29 0.87 0.5], [0.38 0.65 0.98]};
 
 figure('Name', 'Senal en el tiempo', 'Color', 'w');
@@ -118,7 +109,7 @@ if tienePwelch
     title('Densidad espectral de potencia (Welch)');
 end
 
-%% ---- 6. Tabla de resultados para comparar con el dashboard ----
+%% Resultados
 fprintf('=== Registro completo (sin DC) ===\n');
 T1 = table(ejes', rmsReg', picoReg', p2pReg', crestaReg', ...
     'VariableNames', {'Eje', 'RMS_g', 'Pico_g', 'PicoAPico_g', 'Cresta'});
@@ -133,7 +124,7 @@ if tienePwelch
     fprintf('Frecuencia dominante por pwelch (Hz): X=%.1f  Y=%.1f  Z=%.1f\n', fDomPsd);
 end
 
-%% ---- Funcion local: ventanas (simetricas, igual que el dashboard) ----
+%% Ventanas
 function w = ventana_(tipo, n)
     i = (0:n-1)';
     switch tipo

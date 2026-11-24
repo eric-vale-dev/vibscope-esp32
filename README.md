@@ -35,7 +35,7 @@ El MPU9250 va a **3.3 V** (nunca a 5 V).
 2. Cierra el Monitor Serie (el puerto no se puede compartir con el navegador).
 3. Abre `web/index.html` en Chrome o Edge. Si no funciona desde archivo, ejecuta `python3 -m http.server 8000` dentro de `web/` y abre `http://localhost:8000`.
 4. Pulsa **Conectar** y elige el puerto. Espera unos 2 segundos a que la placa se reinicie.
-5. Con el sensor quieto pulsa **Calibrar**, y luego **Iniciar**.
+5. Con el sensor quieto pulsa **Calibrar**. **Iniciar** se habilita solo después de calibrar.
 6. Para guardar datos: **Grabar**, luego **Detener grabación** y **Descargar CSV**.
 
 Sin hardware, el botón **Simulador** genera una señal de prueba.

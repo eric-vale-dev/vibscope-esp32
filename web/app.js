@@ -409,6 +409,7 @@ function iniciarInterfaz() {
 
   const NOMBRES_EJE = ['X', 'Y', 'Z'];
   let puerto = null, lector = null, conectado = false, midiendo = false;
+  let calibrado = false;   // Iniciar se habilita solo después de calibrar
   let simTimer = null, simFase = 0;
   const codificador = new TextEncoder();
 
@@ -420,14 +421,18 @@ function iniciarInterfaz() {
 
   const decodificador = new DecodificadorTramas(
     procesarBloque,
-    (t) => log(t),
+    (t) => {
+      log(t);
+      if (t.startsWith('OK CAL modo=')) { calibrado = true; actualizarBotones(); }
+    },
     () => { estado.errores++; estado.nuevo = true; }
   );
 
   // Estado visual
   function actualizarBotones() {
     const hayFuente = conectado || simTimer !== null;
-    el.btnIniciar.disabled = !conectado;
+    el.btnIniciar.disabled = !conectado || (!calibrado && !midiendo);
+    el.btnIniciar.title = calibrado ? '' : 'Calibra primero';
     el.btnCalibrar.disabled = !conectado;
     el.btnGrabar.disabled = !hayFuente;
     el.btnConectar.textContent = conectado ? 'Desconectar' : 'Conectar';
@@ -460,6 +465,7 @@ function iniciarInterfaz() {
     reiniciarDatos();
     conectado = true;
     midiendo = false;
+    calibrado = false;
     actualizarBotones();
     log('Puerto abierto a 921600 baudios');
     leerPuerto();
@@ -491,6 +497,7 @@ function iniciarInterfaz() {
     try { await enviar('STOP'); } catch (_) { /* ignorar */ }
     conectado = false;
     midiendo = false;
+    calibrado = false;
     try { if (lector) await lector.cancel(); } catch (_) { /* ignorar */ }
     try { await puerto.close(); } catch (_) { /* ignorar */ }
     puerto = null;
@@ -651,6 +658,7 @@ function iniciarInterfaz() {
   el.btnConectar.addEventListener('click', () => (conectado ? desconectar() : conectar()));
 
   el.btnIniciar.addEventListener('click', async () => {
+    if (!midiendo && !calibrado) { log('Calibra el sensor antes de iniciar'); return; }
     midiendo = !midiendo;
     if (midiendo) reiniciarDatos();
     await enviar(midiendo ? 'START' : 'STOP');
@@ -668,7 +676,11 @@ function iniciarInterfaz() {
     estado.nuevo = true;
   }
   el.selFs.addEventListener('change', enviarConfiguracion);
-  el.selRango.addEventListener('change', enviarConfiguracion);
+  el.selRango.addEventListener('change', () => {
+    calibrado = false;   // al cambiar el rango la placa borra la calibración
+    actualizarBotones();
+    enviarConfiguracion();
+  });
 
   for (const s of [el.selEje, el.selNfft, el.selVentana, el.selVisible, el.chkQuitarDC]) {
     s.addEventListener('change', () => { estado.nuevo = true; });
